@@ -79,7 +79,10 @@ class Factory {
 }
 
 function onCreateError(err) {
-    this.stop();
+    function message() {
+        console.log('error creating Mapnik map: ' + err);
+    }
+    this.stop().then(message, message);
 };
 
 module.exports = function(mapnik) {

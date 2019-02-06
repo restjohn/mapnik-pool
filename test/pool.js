@@ -75,11 +75,13 @@ test('uses user style base dir with style file', function(t) {
         .on('factoryCreateError', function(err) {
             t.ok(err instanceof Error, 'expected error');
             t.ok(/\/invalid\/base\//.test(err.message), 'failed because of bad style base dir');
-            t.end();
         });
 
     pool.acquire().then(() => {
         t.fail('acquired invalid map');
+    }, err => {
+        t.ok(err, 'expected error')
+        t.end();
     });
 });
 
