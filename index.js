@@ -7,6 +7,16 @@ const N_CPUS = os.cpus().length;
 const defaultOptions = { size: 256 };
 const defaultMapOptions = {};
 
+pools.Pool.prototype.stop = function() {
+    while (this._waitingClientsQueue.length) {
+        const client = this._waitingClientsQueue.dequeue();
+        client.reject(new Error('pool has been stopped'));
+    }
+    return this.drain().then(() => {
+        return this.clear();
+    });
+};
+
 class Factory {
 
     constructor(mapnik, style, options, mapOptions) {
@@ -20,36 +30,39 @@ class Factory {
 
     create() {
         const map = new this.mapnik.Map(this.options.size, this.options.size);
-        const mapFromString = (xml) => {
+        const setBufferSizeOnMap = function(map) {
+            if (this.options.bufferSize) {
+                map.bufferSize = this.options.bufferSize;
+            }
+            return Promise.resolve(map);
+        }.bind(this);
+
+        if (typeof this.style == 'string') {
             return new Promise((resolve, reject) => {
-                map.fromString(xml, this.mapOptions, err => {
+                map.fromString(this.style, this.mapOptions, (err, map) => {
                     if (err) {
                         reject(err);
                     }
                     else {
-                        if (this.options.bufferSize) {
-                            map.bufferSize = this.options.bufferSize;
-                        }
                         resolve(map);
                     }
                 });
-            });
-        };
-        if (typeof this.style == 'string') {
-            return mapFromString(this.style);
+            })
+            .then(setBufferSizeOnMap);
         }
+
         return new Promise((resolve, reject) => {
             let stylePath = path.resolve(this.style.dir, this.style.name + this.style.ext);
-            fs.readFile(stylePath, 'utf8', (err, content) => {
+            map.load(stylePath, this.mapOptions, (err, map) => {
                 if (err) {
                     reject(err);
                 }
                 else {
-                    resolve(content);
+                    resolve(map);
                 }
             });
         })
-        .then(mapFromString);
+        .then(setBufferSizeOnMap);
     }
 
     destroy(map) {
@@ -65,7 +78,18 @@ class Factory {
     }
 }
 
+function onCreateError(err) {
+    this.stop();
+};
+
 module.exports = function(mapnik) {
+
+    function createPool(style, initOptions, mapOptions) {
+        const factory = new Factory(mapnik, style, initOptions, mapOptions);
+        return pools.createPool(factory, { max: N_CPUS })
+            .on('factoryCreateError', onCreateError);
+    };
+
     return {
         fromStylePath: function(stylePath, initOptions, mapOptions) {
             mapOptions = mapOptions || {};
@@ -73,13 +97,10 @@ module.exports = function(mapnik) {
             if (!mapOptions.base) {
                 mapOptions.base = stylePath.dir;
             }
-            const factory = new Factory(
-                mapnik, stylePath, initOptions, mapOptions);
-            return pools.createPool(factory, { max: N_CPUS });
+            return createPool(stylePath, initOptions, mapOptions);
         },
         fromStyleXML: function fromStyleXML(xml, initOptions, mapOptions) {
-            const factory = new Factory(mapnik, xml, initOptions, mapOptions);
-            return pools.createPool(factory, { max: N_CPUS });
+            return createPool(xml, initOptions, mapOptions);
         }
     };
 };

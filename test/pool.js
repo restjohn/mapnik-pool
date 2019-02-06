@@ -1,6 +1,8 @@
-const test = require('tape').test,
-      mapnik = require('mapnik'),
-      genericPool = require('generic-pool');
+const
+    path = require('path'),
+    test = require('tape').test,
+    mapnik = require('mapnik'),
+    genericPool = require('generic-pool');
 
 mapnik.register_default_input_plugins();
 
@@ -40,7 +42,7 @@ test('from style xml', function(t) {
     });
 });
 
-test.only('from style file', function(t) {
+test('from style file', function(t) {
     const pool = mapnikPool.fromStylePath(__dirname + '/data/map.xml',
         { size: 128, bufferSize: 64 });
 
@@ -61,9 +63,23 @@ test.only('from style file', function(t) {
         return pool.clear();
     })
     .then(() => {
-        t.end();
-    }, (err) => {
-        t.fail(err);
+        t.end()
+    }, err => {
+        t.fail(err)
+    });
+});
+
+test('uses user style base dir with style file', function(t) {
+    const pool = mapnikPool.fromStylePath(
+        __dirname + '/data/map.xml', {}, { base: '/invalid/base' })
+        .on('factoryCreateError', function(err) {
+            t.ok(err instanceof Error, 'expected error');
+            t.ok(/\/invalid\/base\//.test(err.message), 'failed because of bad style base dir');
+            t.end();
+        });
+
+    pool.acquire().then(() => {
+        t.fail('acquired invalid map');
     });
 });
 
@@ -85,20 +101,54 @@ test('initOptions', function(t) {
     .then(() => {
         return pool.clear();
     })
-    .then(t.end, t.fail);
+    .then(() => {
+        t.end()
+    }, err => {
+        t.fail(err)
+    });
 });
 
-// test('passes errors', function(t) {
-//     const pool = mapnikPool.fromString('invalid map',
-//             { bufferSize: 256 });
+test('invalid style xml', function(t) {
+    const pool = mapnikPool.fromStyleXML('invalid map', { bufferSize: 256 });
 
-//     pool.acquire(function(err, map) {
-//         t.ok(err instanceof Error,'expected error');
-//         t.ok(!map, 'expected map to be null');
-//         pool.drain()
-//         .then(() => {
-//             return pool.clear();
-//         })
-//         .then(t.end, t.fail);
-//     });
-// });
+    pool.acquire()
+    .then(map => {
+        t.equal(map, undefined);
+        t.fail('acquired invalid map');
+    })
+    .catch(err => {
+        t.ok(err instanceof Error, 'expected error: ' + err.message);
+        t.end();
+    });
+});
+
+test('invalid style file', function(t) {
+    const pool = mapnikPool.fromStylePath('invalid/map.xml', { bufferSize: 256 });
+
+    pool.acquire()
+    .then(map => {
+        t.equal(map, undefined);
+        t.fail('acquired invalid map');
+    })
+    .catch(err => {
+        t.ok(err instanceof Error, 'expected error: ' + err.message);
+        t.end();
+    });
+});
+
+test('rejects destroy promise when error occurs', function(t) {
+    const pool = mapnikPool
+    .fromStylePath(path.resolve(__dirname, 'data/map.xml'))
+    .on('factoryDestroyError', function(err) {
+        t.equal(err, 'test clear error', 'destroy rejected with expected error');
+        t.end();
+    });
+
+    pool.acquire()
+    .then(map => {
+        map.clear = function() {
+            throw 'test clear error'
+        };
+        return pool.destroy(map);
+    });
+});
